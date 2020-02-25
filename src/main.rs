@@ -1,11 +1,13 @@
 use tokio::io;
+use tokio::sync::Mutex;
 use tokio::net::{TcpListener, TcpStream};
 
 use futures::future::try_select;
 use futures::FutureExt;
+use futures::TryFutureExt;
 use std::env;
 use std::error::Error;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -38,7 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn start_connection(cpt: Arc<Mutex<usize>>) -> Result<(), Box<dyn Error>> {
-    let mut base = cpt.lock().unwrap();
+    let mut base = cpt.lock().await;
     if *base == 0 {
         println!("First connection");
     }
@@ -47,7 +49,7 @@ async fn start_connection(cpt: Arc<Mutex<usize>>) -> Result<(), Box<dyn Error>> 
 }
 
 async fn end_connection(cpt: Arc<Mutex<usize>>) -> Result<(), Box<dyn Error>> {
-    let mut base = cpt.lock().unwrap();
+    let mut base = cpt.lock().await;
     if *base == 0 {
         panic!("wtf happened");
     }
@@ -67,7 +69,12 @@ async fn transfer(mut inbound: TcpStream, proxy_addr: String) -> Result<(), Box<
     let client_to_server = io::copy(&mut ri, &mut wo);
     let server_to_client = io::copy(&mut ro, &mut wi);
 
-    try_select(client_to_server, server_to_client).await;
+    // why the fuck can’t I just return the error
+    try_select(client_to_server, server_to_client).map_err(|e| {
+        match e {
+            futures::future::Either::Left((e, _)) => e,
+            futures::future::Either::Right((e, _)) => e,
+        }}).await?;
 
     Ok(())
 }
